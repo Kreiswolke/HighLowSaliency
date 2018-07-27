@@ -41,9 +41,7 @@ class SteerableCNN(object):
         
         self.W_orients_imag =  [tf.Variable(get_W_rand(), name = 'SteerablePyramid/W_orients_{}_imag'.format(i), trainable =  self.trainable) for i in range(self.n_bands)]
         
-        
 
-        
   
     def get_steerable_filters(self, path = '/gpfs01/bethge/home/oeberle/Results/Steerable_filters/'):
         try:
@@ -59,7 +57,6 @@ class SteerableCNN(object):
         print('USE GABORS')
  
         try:
-            #filters = #pickle.load(open('/gpfs01/bethge/home/oeberle/Results/Steerable_filters/gabor_filters_15_1_0_45_90_180_freq_0.25_rot_mult_5.p', 'rb'), encoding = 'latin1')
             filters = pickle.load(open('/gpfs01/bethge/home/oeberle/Results/Steerable_filters/gabor_filters_15_1_arange_0_180_22.5_freq_0.25_rot_mult_5.p', 'rb'), encoding = 'latin1')
             
 
@@ -69,15 +66,12 @@ class SteerableCNN(object):
     
     def init_filters(self, sess,  level = 0):
         
-     
         highpass_filter_real = self.filters[level]['highpass_real']
         lowpass_filter_real = self.filters[level]['lowpass_real']
         
         orientation_filters_real = self.filters[level]['orientation_real']
         
         orientation_filters_imag = self.filters[level]['orientation_imag']
-        
-        
         
         sess.run(self.W_lp.assign(tf.cast(lowpass_filter_real[:,:,np.newaxis,np.newaxis],tf.float32)))
         
@@ -89,13 +83,9 @@ class SteerableCNN(object):
             sess.run(self.W_orients_imag[i].assign(tf.cast(orientation_filters_imag[i][:,:,np.newaxis,np.newaxis],tf.float32)))
                             
 
-       
-        
         
     def build_steerable_pyramid(self, input_image):
-        
-        
-      #  _image = input_image
+       
         #Downsample input image by factor of 2
         
         if self.im_ds == 2:
@@ -115,21 +105,15 @@ class SteerableCNN(object):
                 _image = levels[-1]['lowpass_feature_real']
                 print('SP: No downsampling.')
                 
-
         return levels
 
 
     def steerable_layer(self, input_image,l ,level = 0):
 
-
-
-
         highpass_feature_real = self.highpass_layer(input_image, self.W_hp, l , 'real')
         lowpass_feature_real = self.lowpass_layer( input_image, self.W_lp,l, 'real')
 
-        #orientation_features = self.orientation_layer(input_image, orientation_filters)
         orientation_features_real = self.orientation_layer(lowpass_feature_real, self.W_orients_real,l, 'real')
-        #orientation_features = self.orientation_layer(input_image, orientation_filters)
         orientation_features_imag = self.orientation_layer(lowpass_feature_real, self.W_orients_imag,l, 'imag') 
 
         packed_orientations_real = tf.pack(orientation_features_real, axis=-1)
@@ -155,33 +139,20 @@ class SteerableCNN(object):
 
 
     def highpass_layer(self, input_image, highpass_filter,l, part):
-        
-        #W_val = tf.cast(highpass_filter,  tf.float32)
-        #W = tf.Variable(W_val, trainable=False, name = 'steer_layer_{}/hp_weight_{}_f{}'.format(l, part,i_feat))
         highpass_feature = tf.nn.conv2d(input_image, highpass_filter, strides=[1, 1, 1, 1], padding="SAME")
-
         return highpass_feature
 
 
 
     def lowpass_layer(self, input_image, lowpass_filter,l, part):
-        
-       # W_val = tf.cast(lowpass_filter,  tf.float32)
-       # W = tf.Variable(W_val, trainable=False, name = 'steer_layer_{}/lp_weight_{}_f{}'.format(l,part,i_feat))
         lowpass_feature = tf.nn.conv2d(input_image, lowpass_filter, strides=[1, 1, 1, 1], padding="SAME")
         return lowpass_feature
 
     def orientation_layer(self, input_image, orientation_filters,l,part):
         orientation_features = []
-        #orientation_filters = []
-
+        
         for b in range(self.n_bands):
-            
-            #W_val = tf.cast(orientation_filters[b],  tf.float32)
-            #W = tf.Variable(W_orients[b], trainable=False, name = 'steer_layer_{}/orient_weight_o{}_{}_f{}'.format(l,b,part,i_feat))
             orientation_feature = tf.nn.conv2d(input_image, orientation_filters[b], strides=[1, 1, 1, 1], padding="SAME")
-
-            #orientation_filters.append(orientation_filter)
             orientation_features.append(orientation_feature)
 
         return orientation_features #, orientation_filters
@@ -237,7 +208,7 @@ class SteerableCNN(object):
         
         with g.as_default():
             input_image = tf.placeholder(tf.float32, [None,None,None,None])#, shape=[None, None,None,None])
-            levels = self.build_steerable_pyramid(input_image)#, return_other=True)
+            levels = self.build_steerable_pyramid(input_image)
 
         return input_image, levels
     
@@ -273,7 +244,6 @@ def optimize_filter(input_image, target_image, filter_size = 15):
         return np.reshape(res['x'], (filter_size,filter_size))
 
 
-#def get_optimized_filters(filter_size, n_bands, height, twidth = 1, dtype = tf.float32):
 def get_optimized_filters(filter_size, n_bands, twidth = 1, dtype = tf.float32):
     level = 0
 
@@ -283,11 +253,12 @@ def get_optimized_filters(filter_size, n_bands, twidth = 1, dtype = tf.float32):
     input_image_fft = np.fft.fftshift(input_image_fft)
     im_shape = np.shape(input_image)[0], np.shape(input_image)[1]
     a, b = get_basis(im_shape[1], im_shape[0]) #width, height
+    
     with tf.Session() as sess2:
         tf.initialize_all_variables().run()
         angle = sess2.run(a)
         log_radius = sess2.run(b)
-#   optimized_filters = {l: {'highpass':None, 'lowpass':None,'orientation':{b:None for b in range(n_bands)}} for l in range(height)}
+        
     optimized_filters = {level: {'highpass_real':None, 'highpass_imag':None,'lowpass_real':None, 'lowpass_imag':None, 
                                  'orientation_real':{b:None for b in range(n_bands)},  'orientation_imag':{b:None for b in range(n_bands)}} }
 

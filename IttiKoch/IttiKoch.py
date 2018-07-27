@@ -358,7 +358,6 @@ class IttiKoch(object):
                 tmp_list.append([self.normalize_min_max(tf.image.resize_images(repeat(v[pyr], 2**(k-1)),_ref_shape)) for k,v in self.net['pre_features']['orientation_pyr'].items() if k >=1])
             self.net['raw_readout_features']['orientation'] = tmp_list
 
-      
         
         # Optional: Add extra blurring to all features (not done in original Itti & Koch model)
         if self.extra_blur == True:
