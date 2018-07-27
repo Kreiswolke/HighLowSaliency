@@ -28,7 +28,8 @@ cv2pyrdown_kernel = np.array([[1,4,6,4,1],
 
 
 def get_gabor(angle, phase = 0., filtersize = -1, filterperiod = np.pi, elongation = 2., major_stddev = 2.):
-    
+    # Compute gabor filters for orientation features
+    # Reimplemented from Matlab GBVS package /gbvs/saltoolbox/makeGaborFilterGBVS.m
     minor_stddev = major_stddev * elongation
     max_stddev = np.max([major_stddev,minor_stddev])
 
@@ -87,36 +88,20 @@ class IttiKoch(object):
         self.pyramid_dict = {k: (int(480/(2**k)),int((640/(2**k)))) for k in range(self.scale+1)}
 
         print(self.s_min, self.s_max, self.deltas)
-    #@staticmethod    
-    #def range_normalization(src):
-    #    minn, maxx = tf.reduce_min(src), tf.reduce_max(src)
-    #    #if not tf.equal(minn,maxx):
-    #    dst = src/(maxx-minn) + minn/(minn-maxx)
-    #    #else:
-    #    #    dst = src - minn
-    #    return dst
-    
+
  
     def map_normalization(self,src):
-        # Global maximum
-        
-        M = tf.reduce_max(src)
+        # Itti & Koch map normalization
+        # Reimplemented from Matlab GBVS package /gbvs/saltoolbox/maxNormalizeStdGBVS.m 
+        # and mexLocalMaximaGBVS.cc
        
-        # Normalize to [0,1] range
-        Min = tf.reduce_min(src)
-        #src = (src-Min)/(M-Min)
-         
-        #(x, mean, variance, offset, scale, variance_epsilon, name=None)
-        variance = (M-Min)**2
-        src = tf.nn.batch_normalization(src, Min, variance, offset = None, scale= None ,variance_epsilon=tf.constant(1e-6,tf.float32))
-        # Resize (maybe somewhere else? )
-        #src= tf.image.resize_images(src, [30,40])
-        # Finding other local maxima
         
+        # Normalize to [0,1] range
+        src = normalize_min_max(src)
+  
+        # Finding other local maxima      
         stepsize = self.norm_stepsize
         shape = src.get_shape().as_list()
-        #shape = tf.shape(src)
-        print('SHAPE', shape)
         width = shape[2]
         height = shape[1]
         # find local maxima
@@ -131,9 +116,8 @@ class IttiKoch(object):
                 #lmin, lmax, dummy1, dummy2 = cv2.minMaxLoc(localimg)
                 lmaxmean = lmaxmean + lmax
                 numlocal =  numlocal + tf.cast(1.,tf.float32)
+                
         # averaging over all the local regions (substract global max
-        
-    
         m_mean = lmaxmean/numlocal
         
         factor = (1.-m_mean)**2
@@ -141,29 +125,21 @@ class IttiKoch(object):
         return result
     
     def normalize_min_max(self,src):
-     
-        M = tf.reduce_max(src)
-       
         # Normalize to [0,1] range
+        M = tf.reduce_max(src)
         Min = tf.reduce_min(src)
-         
-        #(x, mean, variance, offset, scale, variance_epsilon, name=None)
         variance = (M-Min)**2
+        
         target = tf.nn.batch_normalization(src, Min, variance, offset = None, scale= None ,variance_epsilon=tf.constant(1e-6,tf.float32))
         return target
     
     def map_normalization_tf(self,src):
-        # Global maximum
-        
-        M = tf.reduce_max(src)
+        # Itti & Koch map normalization in Tensorflow
+        # Reimplemented from Matlab GBVS package /gbvs/saltoolbox/maxNormalizeStdGBVS.m 
+        # and mexLocalMaximaGBVS.cc
        
-        # Normalize to [0,1] range
-        Min = tf.reduce_min(src)
-        #src = (src-Min)/(M-Min)
-         
-        #(x, mean, variance, offset, scale, variance_epsilon, name=None)
-        variance = (M-Min)**2
-        src = tf.nn.batch_normalization(src, Min, variance, offset = None, scale= None ,variance_epsilon=tf.constant(1e-6,tf.float32))
+        # Renormalize to [0,1] range
+        src = normalize_min_max(src)
 
         # Finding other local maxima
         
@@ -226,7 +202,6 @@ class IttiKoch(object):
         self.net['pre_features']['B_pyr'] = BB
         self.net['pre_features']['Y_pyr'] = YY
 
-       
                     
         for c in range(self.s_min,self.s_max):
             for d in self.deltas:
@@ -240,7 +215,6 @@ class IttiKoch(object):
                 tmp2 =  resized_1 - resized_2
                 
                 net['RG_c_{}_s_{}'.format(c,s)] = tf.nn.relu(tmp1-tmp2)       
-
                     
                 tmp1 = BB[c] - YY[c]
                 ref_shape = tf.shape(tmp1)[1:3]
@@ -290,8 +264,6 @@ class IttiKoch(object):
     @staticmethod
     def get_OrientationFM(I_c, I_s):
         ref_shape = tf.shape(I_c)[1:3]
-        #print('Interpolcation: from _, to_', I_c, I_s)
-
         I_s_resized = tf.image.resize_images(I_s, ref_shape)
         result =  tf.nn.relu(I_c-I_s_resized)
         return result
@@ -299,77 +271,60 @@ class IttiKoch(object):
     
     def get_intensity_conspicuity(self, net, ref_shape):
         normalized_net =  {k:self.map_normalization_tf(repeat(v, 2**(int(k.split('_')[2])-1))) for k,v in net.items()}
-        
-       # net =  {k:tf.image.resize_images(v, ref_shape) for k,v in normalized_net.items()}
         return normalized_net
 
     def get_color_conspicuity(self, net, ref_shape ):
-                
-   
+
         normalized_net_RG =  {k:self.map_normalization_tf(repeat(v, 2**(int(k.split('_')[2])-1))) for k,v in net.items() if k.startswith('RG')}
         normalized_net_BY =  {k:self.map_normalization_tf(repeat(v, 2**(int(k.split('_')[2])-1))) for k,v in net.items() if k.startswith('BY')}
-        
-        #normalized_net_RG = {k:tf.image.resize_images(v, ref_shape) for k,v in normalized_net_RG.items()}
-        #normalized_net_BY = {k:tf.image.resize_images(v, ref_shape) for k,v in normalized_net_BY.items()}
-
-        
+       
         net = {'{}_+_{}'.format(k1,k2): v1 + v2 for (k1,v1),(k2,v2) in zip(normalized_net_RG.items(), normalized_net_BY.items())}
         return net
     
     def get_orientation_conspicuity(self, net, ref_shape):
         normalized_net =  {k:self.map_normalization_tf(repeat(v, 2**(int(k.split('_')[2])-1))) for k,v in net.items()}
-        #normalized_net =  {k:tf.image.resize_images(v, ref_shape) for k,v in normalized_net.items()}
-
         net = {}
-        #for k, feature in normalized_net.items():
-        net = {}
+        # Add across-scale maps for each orientation
         for angle in self.orientations:
             net[angle] = self.map_normalization_tf(tf.add_n([v for k,v in normalized_net.items() if k.endswith(str(int(angle)))]))
        
         return net
-    
-    
-            
 
         
     
     def build(self, _input):
         
         self.net = {'raw_readout_features': {}, 'readout_features': {}, 'filters': {}, 'pre_features':{},'features':{}, 'conspicuity':{}}
-        # self._input = tf.placeholder(tf.float32, shape= (1,None, None,3), name = 'input_image')
         self._input = _input
         R,G,B,Y,I = self.color_itensity_features(self._input)
 
  
         # 1. Obtain Feature maps and compute center surround differences
         
-        # Intensity Gaussian Pyramid and Intensity Contrast features
+        # Intensity Gaussian Pyramid and Intensity Contrast features (six maps)
         self.net['features']['intensity'] = self.gaussian_pyramid_center_surround(I)
         
-        # Color Gaussian Pyramid
+        # Across-scale color features (12 maps)
         self.net['features']['color'] = self.get_color_features(R,G,B,Y)
 
-        # Orientation            
+        # Across-scale orientation features (24 maps)
         self.net['features']['orientation'] = self.get_orientation_features(I)
 
         if self.feature_type == 'conspicuity':
-            # 2. Compute Conspicuity maps
+            # 2. Compute Conspicuity maps 
             ref_shape = self.pyramid_dict[self.ref_scale]
 
-            # normalizing and combining intensity feature maps
+            # normalizing and combining intensity feature maps (6 maps)
             self.net['conspicuity']['intensity'] =  self.get_intensity_conspicuity(self.net['features']['intensity'], ref_shape)
-
-            # normalizing and combining color feature maps
+            # normalizing and combining color feature maps (6 maps)
             
             self.net['conspicuity']['color'] = self.get_color_conspicuity(self.net['features']['color'],ref_shape)
 
-            # normalizing and combining orientation feature maps
+            # normalizing and combining orientation feature maps (4 maps)
             self.net['conspicuity']['orientation'] = self.get_orientation_conspicuity(self.net['features']['orientation'],ref_shape)
 
-        
-        ####################################################################################################################
-        # Training Maps for DeepGaze
-        
+        # In case intermediate processing layers are desired, features are resized and normalized and can 
+        # be used directly for readout
         
         elif self.feature_type == 'ik_features':
             # 1) Center surround maps
@@ -398,16 +353,14 @@ class IttiKoch(object):
             tmp_list = []
             for angle in self.orientations: 
                 pyr = 'orient_{}'.format(int(angle))
-            # Orientation
+                # Orientation
                 print(self.net['pre_features']['orientation_pyr'])
                 tmp_list.append([self.normalize_min_max(tf.image.resize_images(repeat(v[pyr], 2**(k-1)),_ref_shape)) for k,v in self.net['pre_features']['orientation_pyr'].items() if k >=1])
             self.net['raw_readout_features']['orientation'] = tmp_list
 
-
+      
         
-        #############################################################################################################
-        
-        
+        # Optional: Add extra blurring to all features (not done in original Itti & Koch model)
         if self.extra_blur == True:
             self.net['readout_features']['intensity'] = {k:gauss_blur(v, 10., windowradius=5,) for k,v in self.net['readout_features']['intensity'].items()}
             
@@ -457,7 +410,7 @@ class IttiKoch(object):
         R = r-(g+b)/2.
         G = g-(r+b)/2.
         B = b - (r+g)/2.
-        #Y =(r+g)/2. - tf.nn.relu(r-g)/2. - b
+        #Y =(r+g)/2. - tf.nn.relu(r-g)/2. - b 
         Y = r + g -2*(tf.nn.relu(r-g)/2. + b)
 
         return R,G,B,Y,I
@@ -467,7 +420,7 @@ class IttiKoch(object):
     def get_IntensityFM(I_c,I_s):
         ref_shape = tf.shape(I_c)[1:3]
         
-        print('Interpolcation: from _, to_', I_c, I_s)
+        print('Interpolation: from _, to_', I_c, I_s)
 
         #print(ref_shape)
         I_s_resized = tf.image.resize_images(I_s, ref_shape)
@@ -478,21 +431,17 @@ class IttiKoch(object):
     def get_ColorFM(I1_c, I2_c, I1_s, I2_s):
         ref_shape = tf.shape(I1_c)[1:3]
         print('Interpolcation: from _, to_', I1_c, I1_s)
-       # print(I1_c, ref_shape)
         
-        #print(I1_c, I2_c, I1_s, I2_s)
         I1_s_resized = tf.image.resize_images(I1_s, ref_shape)
         I2_s_resized = tf.image.resize_images(I2_s, ref_shape)
-        
-        #print(I1_c, I2_c, I1_s, I2_s,I1_s_resized, I2_s_resized)
-        
+                
         result =  tf.nn.relu((I1_c - I2_c  )- (I1_s_resized - I2_s_resized))
         return result
 
         
         
 if __name__ == '__main__':
-    print('ITTIKOCH')        
+    print('Itti & Koch model')        
 
 
         
